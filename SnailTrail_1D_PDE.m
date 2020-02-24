@@ -13,7 +13,7 @@ function [BCModel_StalkCellDensity, BCModel_TipCellDensity, Omega, TimeMesh] = S
 %--------------------------------------------------------------------------
 %% Set up Domain, Initialize Parameters, Set Initial Condition
 % Space-Time Domain:
-Omega = linspace(0, 10, 1001)'; % X-Coordinates
+Omega = linspace(0, 1, 201)'; % X-Coordinates
 TimeMesh = 0:1/160:2;
 N = length(Omega);
 Dx = Omega(2);
