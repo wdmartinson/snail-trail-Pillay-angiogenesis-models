@@ -1,4 +1,4 @@
-function [TC_ColumnAverages, EC_ColumnAverages, TC_ColumnAverage, EC_ColumnAverage, NumberSelfLoops, AverageSelfLoops, NumberTipTipAnastomoses, NumberTipSproutAnastomoses, NumberofTipCellsTime, NumberofBranchEvents, SproutLengths, AverageSproutLength, StDevSproutLength, AverageBranchLength, StDevBranchLength, NumberBacktrackingLoops, BranchLengths, SelfLoopsNoBacktracking, NumberofLargeSelfLoops, Networks, PerfusedNetworks, Perfused_ColumnAverages, Perfused_ColumnAverage, Average2DTipCellNetwork, Average2DStalkCellNetwork, SurvivingSprouts_LateralMovement, SurvivingSprouts_LengthofSprout, SurvivingSprouts_RatioofLateralMovement, SproutsAliveYesNo, ReachedTumorYesNo, TC_Solution, EC_Solution, SummaryStatistics, Parameters, Time] = Pillay_2017_CA_MultipleRealizations
+function [TC_ColumnAverages, EC_ColumnAverages, TC_ColumnAverage, EC_ColumnAverage, NumberSelfLoops, AverageSelfLoops, NumberTipTipAnastomoses, NumberTipSproutAnastomoses, NumberofTipCellsTime, NumberofBranchEvents, SproutLengths, AverageSproutLength, StDevSproutLength, AverageBranchLength, StDevBranchLength, NumberBacktrackingLoops, BranchLengths, SelfLoopsNoBacktracking, NumberofLargeSelfLoops, Networks, PerfusedNetworks, Perfused_ColumnAverages, Perfused_ColumnAverage, Average2DTipCellNetwork, Average2DStalkCellNetwork, SurvivingSprouts_LateralMovement, SurvivingSprouts_LengthofSprout, SurvivingSprouts_RatioofLateralMovement, SproutsAliveYesNo, ReachedTumorYesNo, TC_Solution, EC_Solution, SummaryStatistics, Parameters, Time] = ABM_2D_Model
 % Computes multiple realizations of the ABM originally described in Pillay
 % et al. (2017)
 %--------------------------------------------------------------------------
@@ -25,7 +25,7 @@ c = repmat(linspace(0, 1, Parameters.N), Parameters.N, 1); % TAF Concentration M
 % TAF Field Linear in X and Y (c(x,y,t) = 0.5*(x + y))
 % c = 0.5*(linspace(0,1,Parameters.N)' + linspace(0,1,Parameters.N));
 
-Parameters.M = 1000; % Number of Realizations
+Parameters.M = 2; % Number of Realizations
 % Add on number of realizations to filename:
 filename = [filename,'_',num2str(Parameters.M),'Realizations'];
 
