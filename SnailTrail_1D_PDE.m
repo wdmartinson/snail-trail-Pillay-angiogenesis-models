@@ -14,14 +14,14 @@ function [BCModel_StalkCellDensity, BCModel_TipCellDensity, Omega, TimeMesh] = S
 %% Set up Domain, Initialize Parameters, Set Initial Condition
 % Space-Time Domain:
 Omega = linspace(0, 1, 201)'; % X-Coordinates
-TimeMesh = 0:1/160:2;
+TimeMesh = 0.2:1/160:2;
 N = length(Omega);
 Dx = Omega(2);
 
 % Parameters:
 k = 100;
 h = 1/200;
-beta_n = 160; chi = beta2*k*h^2; D = beta2*h^2/4; beta_e = 1e-12*beta2; lambda = 0.16; kappa = 2;
+beta_n = 160; chi = beta_n*k*h^2; D = beta_n*h^2/4; beta_e = 0.0343*beta_n; lambda = 0.16; kappa = 2;
 
 % Initial Condition, specified as a vector
 z0 = zeros(2*N, 1); % [p; n; new_p determined by mu*N approximation; new_n determined by mu*N approximation for p]
