@@ -1,34 +1,60 @@
 function [TC_ColumnAverages, EC_ColumnAverages, TC_ColumnAverage, EC_ColumnAverage, NumberSelfLoops, AverageSelfLoops, NumberTipTipAnastomoses, NumberTipSproutAnastomoses, NumberofTipCellsTime, NumberofBranchEvents, SproutLengths, AverageSproutLength, StDevSproutLength, AverageBranchLength, StDevBranchLength, NumberBacktrackingLoops, BranchLengths, SelfLoopsNoBacktracking, NumberofLargeSelfLoops, Networks, PerfusedNetworks, Perfused_ColumnAverages, Perfused_ColumnAverage, Average2DTipCellNetwork, Average2DStalkCellNetwork, SurvivingSprouts_LateralMovement, SurvivingSprouts_LengthofSprout, SurvivingSprouts_RatioofLateralMovement, SproutsAliveYesNo, ReachedTumorYesNo, TC_Solution, EC_Solution, SummaryStatistics, Parameters, Time] = ABM_2D_Model
-% Computes multiple realizations of the ABM originally described in Pillay
-% et al. (2017)
+% Computes multiple realizations of Pillay_2017_CA.m (See other function in
+% folder)
 %--------------------------------------------------------------------------
 %% Name Solution Files
-filename = '';
-%% Pre allocate solutions, parameters
+% filename = '12may2020_PillayCAModel_Fixed_P_p0_P_m1_k100_NonlinearXY_TAFField_NoBranchingOrAnastomosis';
+filename = 'ABM_Data';
+%% Parameter values, Pre-allocation of data: 
 %------------ Parameters-------------------------------------
-Parameters.N = 200 + 1; % Lattice side size, indexed from i,j = 1 to R+1
-Parameters.h = 1/(Parameters.N-1); % Cell/Lattice Grid Point Size
+Parameters.N = 200 + 1; % Number of Lattice points
+Parameters.h = 1/(Parameters.N-1); % Spatial step size of lattice
 Parameters.Q = 2*Parameters.N+50; % Number of cells to track for each branch/sprout
 Parameters.P_m = 1; % Probability of Movement
-Parameters.P_p = 1e-3; % Branching Probability
+Parameters.P_p = 0; % Probability of branching (note: proportional to TAF concentration also)
 Parameters.dt = 1/160; % Time Step
-Parameters.k = 100;
+% Parameters.dt = 1/320;
+% Parameters.dt = 0.01;
+Parameters.k = 100; % ABM parameter related to sensitivity of tip cells to TAF
 Parameters.Tf = 2; % Final Time
+% Parameters.Tf = 320*Parameters.dt;
 
-Parameters.a_n = true; % Tip-to-Tip Anastomosis (Binary)
-Parameters.a_e = true; % Tip-to-Sprout Anastomosis (Binary)
-Parameters.EC_Branching_YesNo = false; % Will you add on EC after branching or not (Binary)
+Parameters.a_n = false; % Does Tip-to-Tip Anastomosis Occur? (Binary)
+Parameters.a_e = false; % Does Tip-to-Sprout Anastomosis Occur? (Binary)
+Parameters.EC_Branching_YesNo = false; % Will you add on a stalk cell after branching or not? (Binary)
 
-% Original TAF Concentration Matrix (c(x,y,t) = x)
-c = repmat(linspace(0, 1, Parameters.N), Parameters.N, 1); % TAF Concentration Matrix
+Parameters.M = 1000; % Number of Realizations
 
-% TAF Field Linear in X and Y (c(x,y,t) = 0.5*(x + y))
-% c = 0.5*(linspace(0,1,Parameters.N)' + linspace(0,1,Parameters.N));
-
-Parameters.M = 2; % Number of Realizations
 % Add on number of realizations to filename:
 filename = [filename,'_',num2str(Parameters.M),'Realizations'];
+%------------ TAF Concentration-------------------------------------
+% c(x,y) = x
+c = repmat(linspace(0, 1, Parameters.N), Parameters.N, 1); % TAF Concentration Matrix
 
+% c(x,y) = exp((-(x-1).^2)-(y-1).^2/2.5)
+% c = exp((-(linspace(0,1,Parameters.N)-1).^2)./1+(-(linspace(0,1,Parameters.N)'-1).^2.)./2.5);
+
+% c(x,y) = xy
+% c = linspace(0,1,201).*linspace(0,1,201)';
+
+% c(x,y) = 0.5*(x + y)
+% c = 0.5*(linspace(0,1,Parameters.N)' + linspace(0,1,Parameters.N));
+
+% c(x,y) = 1/2*y + 1/3*x
+% c = 0.5*(linspace(0,1,201)') + 1/3*(linspace(0,1,201));
+
+% c(x,y) = 1/2*x^2
+% c = repmat(0.5*(linspace(0, 1, Parameters.N)).^2, Parameters.N, 1); % TAF Concentration Matrix
+
+% c(x,y) = 1-(x-0.5)^2-(y-0.5)^2
+% c = 1 - (linspace(0,1,201)-0.5).^2 - (linspace(0,1,201)'-0.5).^2;
+
+% Graph c(x,y) to make sure that you have the correct TAF concentration
+% profile:
+surf(linspace(0, 1, Parameters.N), linspace(0, 1, Parameters.N), c);
+xlabel('x')
+
+%------------ Pre-allocate solutions -------------------------------------
 Time = (0:Parameters.dt:Parameters.Tf)';
 Lt = length(Time);
 
@@ -54,13 +80,37 @@ SproutsAliveYesNo = zeros(Parameters.M,1,'logical');
 ReachedTumorYesNo = zeros(Parameters.M,1,'logical');
 Average2DTipCellNetwork = zeros(Parameters.N,Parameters.N,Lt);
 Average2DStalkCellNetwork = zeros(Parameters.N,Parameters.N,Lt);
-%--------------------------------------------------------------------------
-for R = 1:Parameters.M
+
+Networks = cell(Parameters.M);
+PerfusedNetworks = Networks;
+TC_Solution = Networks;
+EC_Solution = Networks;
+
+Num_realizations = Parameters.M;
+%--------------------Solve the ABM for M realizations----------------------
+parfor R = 1:Parameters.M
     fprintf(['Solving for Realization ',num2str(R),'\n'])
-    [~, ~, TC_ColumnAverages(:,:,R), EC_ColumnAverages(:,:,R), Networks, NumberSelfLoops(:,R), NumberTipTipAnastomoses(:,R), NumberTipSproutAnastomoses(:,R), NumberofTipCellsTime(:,R), NumberofBranchEvents(:,R), SproutLengths(:,:,R), NumberBacktrackingLoops(:,R), BranchLengths(:,:,R), NumberofLargeSelfLoops(R), PerfusedNetworks, Perfused_ColumnAverages(:,:,R), ~, TC_Solution, EC_Solution, ~, ~, ~, SproutsAliveYesNo(R), ReachedTumorYesNo(R)] = Pillay_2017_CA;
-    Average2DTipCellNetwork = Average2DTipCellNetwork + double(TC_Solution);
-    Average2DStalkCellNetwork = Average2DStalkCellNetwork + double(EC_Solution);
+    [~, ~, TC_ColumnAverages(:,:,R), EC_ColumnAverages(:,:,R), Example_Networks, NumberSelfLoops(:,R), NumberTipTipAnastomoses(:,R), NumberTipSproutAnastomoses(:,R), NumberofTipCellsTime(:,R), NumberofBranchEvents(:,R), SproutLengths(:,:,R), NumberBacktrackingLoops(:,R), BranchLengths(:,:,R), NumberofLargeSelfLoops(R), Example_PerfusedNetworks, Perfused_ColumnAverages(:,:,R), ~, Example_TC_Solution, Example_EC_Solution, ~, ~, ~, SproutsAliveYesNo(R), ReachedTumorYesNo(R)] = Pillay_2017_CA(c,Parameters);
+    Average2DTipCellNetwork = Average2DTipCellNetwork + double(Example_TC_Solution);
+    Average2DStalkCellNetwork = Average2DStalkCellNetwork + double(Example_EC_Solution);
+    if R == Num_realizations
+        Networks{R} = Example_Networks;
+        PerfusedNetworks{R} = Example_PerfusedNetworks;
+        TC_Solution{R} = Example_TC_Solution;
+        EC_Solution{R} = Example_EC_Solution;
+    else
+        Networks{R} = [];
+        PerfusedNetworks{R} = [];
+        TC_Solution{R} = [];
+        EC_Solution{R} = [];
+    end % if
 end % for R
+
+Networks = Networks{end};
+PerfusedNetworks = PerfusedNetworks{end};
+TC_Solution = TC_Solution{end};
+EC_Solution = EC_Solution{end};
+
 %% Take averages
 % Gives column x Time matrices of size (N x Lt)
 Average2DTipCellNetwork = 1/Parameters.M*Average2DTipCellNetwork;
@@ -312,24 +362,35 @@ Standard_Deviation = [std(TotalLoopsFormedNoSelfLoops);...
     ];
 SummaryStatistics = table(Mean, ...
     Standard_Deviation, 'RowNames', stats_descriptions);
-%% Write CSV Files for use in 2D PDE Model
+%% Write CSV Files for use in 2D/1D PDE Models
 i = find(Time==0.2);
 X = reshape(repmat(linspace(0,1,Parameters.N),Parameters.N,1),Parameters.N^2,1);
 Y = repmat(linspace(0,1,Parameters.N)', Parameters.N, 1);
-csvwrite([filename,'_Average2DStalkCellNetwork.csv'], [X, Y, reshape(Average2DStalkCellNetwork(:,:,i), Parameters.N^2, 1)]);
-csvwrite([filename,'_Average2DTipCellNetwork.csv'], [X, Y, reshape(Average2DTipCellNetwork(:,:,i), Parameters.N^2, 1)]);
+% Save 2D P--ABM results at t = 0.2:
+csvwrite([filename,'_Average2DStalkCellNetwork_t2.csv'], [X, Y, reshape(Average2DStalkCellNetwork(:,:,i), Parameters.N^2, 1)]);
+csvwrite([filename,'_Average2DTipCellNetwork_t2.csv'], [X, Y, reshape(Average2DTipCellNetwork(:,:,i), Parameters.N^2, 1)]);
+for t = 4:2:20
+i = 1 + 16*t;
+csvwrite([filename,'_Average2DStalkCellNetwork_t',num2str(t),'.csv'], [X, Y, reshape(Average2DStalkCellNetwork(:,:,i), Parameters.N^2, 1)]);
+csvwrite([filename,'_Average2DTipCellNetwork_t',num2str(t),'.csv'], [X, Y, reshape(Average2DTipCellNetwork(:,:,i), Parameters.N^2, 1)]);
+end
 
-csvwrite([filename, '_1DTipCellNetworkIC.csv'], [linspace(0,1,Parameters.N)', TC_ColumnAverage(:,i)]);
-csvwrite([filename, '_1DStalkCellNetworkIC.csv'], [linspace(0,1,Parameters.N)', EC_ColumnAverage(:,i)]);
-
-%% Write Video Files using the Data You've Collected
-PillayCA_WriteVideos(filename, Networks, PerfusedNetworks, BranchLengths, SproutLengths, Time, Average2DStalkCellNetwork, Average2DTipCellNetwork, TC_Solution);
-
+% Save column averaged 2D P--ABM results at t = 0.2, 0.4, ..., 2:
+csvwrite([filename, '_1DTipCellNetworkIC_t2.csv'], [linspace(0,1,Parameters.N)', TC_ColumnAverage(:,i)]);
+csvwrite([filename, '_1DStalkCellNetworkIC_t2.csv'], [linspace(0,1,Parameters.N)', EC_ColumnAverage(:,i)]);
+for t = 4:2:20
+i = 1 + 16*t;
+csvwrite([filename, '_Average1DTipCellNetwork_t',num2str(t),'.csv'], [linspace(0,1,Parameters.N)', TC_ColumnAverage(:,i)]);
+csvwrite([filename, '_Average1DStalkCellNetwork_t',num2str(t),'.csv'], [linspace(0,1,Parameters.N)', EC_ColumnAverage(:,i)]);
+end
 %% Save Workspace for Future Reference
 save([filename,'.mat']);
+%% Write Video Files using the Data You've Collected
+PillayCA_WriteVideos(filename, Networks, PerfusedNetworks, BranchLengths, SproutLengths, Time, Average2DStalkCellNetwork, Average2DTipCellNetwork, TC_Solution, Parameters);
+end % function Pillay_2017_CA_MultipleRealizations.m
 %--------------------------------------------------------------------------
 %% Subfunctions
-function [Time, Sprouts, TC_ColumnAverage, EC_ColumnAverage, Network, NumberofSelfLoops, NumberTipTipAnastomoses, NumberTipSproutAnastomoses, NumberofTipCells, NumberofBranchEvents, SproutLengths, NumberofBackTrackingLoops, BranchLengths, NumberofLargeSelfLoops, PerfusedNetwork, Perfused_ColumnAverage, TC_Matrix, TC_Solution, EC_Solution, LateralMovement, LengthofSprout, RatioofLateralMovement, SurvivingSproutsYesNo, ReachedTumorYesNo] = Pillay_2017_CA
+function [Time, Sprouts, TC_ColumnAverage, EC_ColumnAverage, Network, NumberofSelfLoops, NumberTipTipAnastomoses, NumberTipSproutAnastomoses, NumberofTipCells, NumberofBranchEvents, SproutLengths, NumberofBackTrackingLoops, BranchLengths, NumberofLargeSelfLoops, PerfusedNetwork, Perfused_ColumnAverage, TC_Matrix, TC_Solution, EC_Solution, LateralMovement, LengthofSprout, RatioofLateralMovement, SurvivingSproutsYesNo, ReachedTumorYesNo] = Pillay_2017_CA(c,Parameters)
 % 2D CA Model from Pillay et al.
 % Output:     Time, a T x 1 vector containing the time points of the
 %               simulation
@@ -346,7 +407,10 @@ Time = (0:Parameters.dt:Parameters.Tf)'; % Vector of times
 Lt = length(Time);
 
 % Initial Condition
+% TC_Matrix = [100, 50; 95, 50]; % Store the index of R tip cells
 TC_Matrix = uint16([(2:2:Parameters.N)', ones(length(2:2:Parameters.N),1)]);
+% TC_Matrix = [(102:2:Parameters.N)', ones(length(102:2:Parameters.N), 1)];
+% TC_Matrix = [150, 2; 50, 2];
 Network = zeros(Parameters.N, Parameters.N, Lt, 'uint8'); % 3D array that stores cell occupancy at all time points (TC = EC = 1)
 Network(sub2ind([Parameters.N,Parameters.N,Lt], TC_Matrix(:,1), TC_Matrix(:,2))) = 1; % Initial Condition
 
@@ -371,6 +435,7 @@ Path_History = zeros(10, 2, size(TC_Matrix,1),'uint16');
 
 % Create a vector that tracks how many branching points occur vs time
 NumberofBranchEvents = NumberofSelfLoops;
+% BranchLengths = [];
 BranchLengths = zeros(Parameters.Q,Lt, 'uint16');
 Branch_EC_Counter = zeros(0,0,'uint16');
 BranchIndices = zeros(0,0,'uint16');
@@ -383,6 +448,7 @@ NumberofTipCells = zeros(Lt, 1, 'uint16'); % Keeps Track of Number of active tip
 NumberofTipCells(1) = size(TC_Matrix,1);
 index_store = zeros(0,0,'uint16');
 
+% SproutLengths = []; % Will store the number of cells that formed a branch before an anastomosis event
 SproutLengths = zeros(Parameters.Q, Lt, 'uint16'); % Stores both the original vessels AND branches
 SproutLengths(1) = size(TC_Matrix,1);
 
@@ -449,6 +515,12 @@ while t<Lt
             end % if TC_Matrix
             assert(abs(g_x)<=1+2e-15, 'g_x is greater than 1. Adjust k.');
             assert(abs(g_y)<=1+2e-15, 'g_y is greater than 1. Adjust k.');
+%             if abs(g_x)>1
+%                 g_x = sign(g_x)*1;
+%             end % if abs(g_x)>1
+%             if abs(g_y)>1
+%                 g_y = sign(g_y)*1;
+%             end % if abs(g_y)>1
             if S < (1-g_x)/4
                 if TC_Matrix(R1(ii),2)~=1
                 % Move Left if you're not at boundary
@@ -536,6 +608,8 @@ while t<Lt
                 AnastomosisEventOccured = true;
             % Tip-to-Sprout Anastomosis
             elseif Parameters.a_e && ~AnastomosisEventOccured && EC_Solution(sub2ind(size(EC_Solution), TC_Matrix(R1(ii),1), TC_Matrix(R1(ii),2), t+1)) && ~TC_Solution(sub2ind(size(TC_Solution), TC_Matrix(R1(ii),1), TC_Matrix(R1(ii),2), t+1))
+%                 if isempty(intersect(TC_Matrix(R1(ii),:), Sprouts(1:EC_Counter(R1(ii)),:,R1(ii)), 'rows'))
+%                 if isempty(intersect(TC_Matrix(R1(ii),:), Path_History(:,:,R1(ii)), 'rows'))
                 if ~ismember(TC_Matrix(R1(ii),:), Path_History(:,:,R1(ii)), 'rows')
                     % Record successful tip-sprout loop formation
                     NumberTipSproutAnastomoses(t+1) = NumberTipSproutAnastomoses(t+1) + 1;
@@ -599,11 +673,20 @@ while t<Lt
                     NumberofSelfLoops(t+1) = NumberofSelfLoops(t+1)+1;
                     
                     % If self-loop occured by backtracking, record it
+%                     if EC_Counter(R1(ii))~=1 && ismember(TC_Matrix(R1(ii),:),Sprouts(EC_Counter(R1(ii))-1,:,R1(ii)),'rows')
                     % 5/24/19: Following line is new code for Path_History
                     % stuff
                     if EC_Counter(R1(ii))~=1 && ismember(TC_Matrix(R1(ii),:),Path_History(2,:,R1(ii)),'rows')
                         NumberofBackTrackingLoops(t+1) = NumberofBackTrackingLoops(t+1)+1;
                     end % if EC_Counter(R1(...
+                    
+                    % If a vessel is over 10 cells long and a self loop is
+                    % formed that would be more than 10 cells in diameter,
+                    % record it (this is only valid if Path_History isn't
+                    % used).
+%                     if EC_Counter(R1(ii))>=11 && ~ismember(TC_Matrix(R1(ii),:),Sprouts(EC_Counter(R1(ii))-9:EC_Counter(R1(ii)),:,R1(ii)),'rows')
+%                         NumberofLargeSelfLoops = NumberofLargeSelfLoops+1;
+%                     end % if EC_Counter(R1(ii))>=11                  
                     
                     % Put back the TC to the network and the TC solution
                     % arrays
@@ -622,6 +705,7 @@ while t<Lt
     % These lines of code delete terminated sprouts from the 3D arrays, so
     % that when you delete all NaN variables in TC_Matrix and EC_Counter,
     % you don't accidentally change the indexing between arrays
+%     if any(any(any(isnan(Sprouts))))
     if any(~all(TC_Matrix))
         % Reset indices for Branches, for calculating lengths
         for vv = 1:length(BranchIndices)
@@ -663,6 +747,9 @@ while t<Lt
         
         % Original Model: Branching is Dependent on TAF Concentration
         P_b = Parameters.P_p*c(sub2ind(size(c), TC_Matrix(R2(jj),1), TC_Matrix(R2(jj),2)));
+
+        % Simpler Model: Branching is Independent of TAF Concentration
+%         P_b = Parameters.P_p;
         
         if r <= P_b
            %% Add on endothelial cell where you are, if you add EC after branching
@@ -805,7 +892,7 @@ EC_ColumnAverage = squeeze(mean(double(EC_Solution), 1));
 Perfused_ColumnAverage = squeeze(mean(double(PerfusedNetwork), 1));
 end % function Pillay_2017_CA.m 
 
-function PillayCA_WriteVideos(filename, Networks, PerfusedNetworks, BranchLengths, SproutLengths, Time, Average2DStalkCellNetwork, Average2DTipCellNetwork, TC_Solution)
+function PillayCA_WriteVideos(filename, Networks, PerfusedNetworks, BranchLengths, SproutLengths, Time, Average2DStalkCellNetwork, Average2DTipCellNetwork, TC_Solution, Parameters)
 v = VideoWriter([filename,'_ExampleNetwork-with-VesselLengths']);
 v.Quality = 100;
 v.FrameRate = 5; % Want about 5 time steps per second, although you can change this
@@ -1075,5 +1162,3 @@ close(n);
 close(r);
 close(u);
 end % function PillayCA_WriteVideos.m
-
-end % function Pillay_2017_CA_MultipleRealizations.m
