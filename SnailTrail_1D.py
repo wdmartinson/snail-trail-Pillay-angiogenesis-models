@@ -1,43 +1,39 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jul  3 13:05:17 2019
-
-@author: duncanmartinson
-"""
 ## You must download Docker to run this program
 ## Run these lines of code once you have downloaded docker and fenics:
 
 # cd (directory)
 # docker run -ti -v $(pwd):/home/fenics/shared:z quay.io/fenicsproject/stable
 # cd $HOME/shared
-# python3 SnailTrail_2D_PDE.py
+# python3 SnailTrail_1D.py
 ###############################################################################
-# Solves the Snail-Trail PDE System described in Martinson et al. (2020)
-# in 2D on a Unit Square domain with No-Flux BCs and data from a CSV
-# file containing the results of a 2D CA model as the initial condition.
+# Solves the 1D Snail-Trail PDE System described in Martinson et al. (2020) for
+# a Unit Interval domain with No-Flux BCs for the tip cells.
+# Column averaged ABM Data at t = 0.2 is used as an initial condition for the
+# PDE system, which is solved for t = 0.2 to t = 2.
 ###############################################################################
 from dolfin import *
 from mshr import *
-from math import exp
+#from math import log
 import numpy as np
-from scipy.interpolate import NearestNDInterpolator
+from scipy.interpolate import interp1d
+from scipy.optimize import least_squares
 from decimal import Decimal
 
-# Read csv data for tip and stalk cells
-TCdata = np.loadtxt('', delimiter = ',')
-ECdata = np.loadtxt('', delimiter = ',')
+# Read csv data for tip and stalk cells at t=0.2s
+TCdata = np.loadtxt('Tip_Cell_ColumnAveraged_ABM_Data_t2.csv', delimiter = ',')
+ECdata = np.loadtxt('Stalk_Cell_ColumnAveraged_ABM_Data_t2.csv', delimiter = ',')
 
 # Store the data you have read in arrays, and use this to create an interpolant
 # function on a 2D grid
-X, Y, TCValues = TCdata[:,0], TCdata[:,1], TCdata[:,2]
-ECValues = ECdata[:,2]
+X, TCValues = TCdata[:,0], TCdata[:,1]
+ECValues = ECdata[:,1]
 print('Finding interpolant function for TC data...')
-TCinterpolant = NearestNDInterpolator((X,Y), TCValues)
+TCinterpolant = interp1d(X, TCValues)
 print('Done!')
 print('Finding interpolant function for EC data...')
-ECinterpolant = NearestNDInterpolator((X,Y), ECValues)
+ECinterpolant = interp1d(X, ECValues)
 print('Done!')
+
 # This class allows the user to set up an initial condition for the PDE model
 # using the .csv file:
 class InitialConditionfromCSVFile(UserExpression):
@@ -54,40 +50,55 @@ class InitialConditionfromCSVFile(UserExpression):
 class TAF_Profile(UserExpression):
     def eval(self, values, x):
         values[:] = x[0] # c(x,y,t) = x
-        #values[:] = exp(-(x[0]-(1+10**(-16)))**2-(x[1]-1.0)**2/2.5)
+        #values[:] = exp(-(x[0]-(1.0))**2-(x[1]-1.0)**2/2.5)
         #values[:] = 0.5*(x[1]) + 1.0/3.0*(x[0])
         #values[:] = 0.5*(x[0]+x[1])
         #values[:] = x[0]*x[1]
         #values[:] = 1-(x[0]-0.5)**2-(x[1]-0.5)**2
         #values[:] = 1.0
+        #values[:] = 11.0/12-(x-0.5)**2
+        #values[:] = 0.5*x[0]+0.25
+        #values[:] = 0.5*x[0]
 
-class TipCell_Initial_Condition(UserExpression):
-    def eval(self, values, x):
-        values[:] = exp(-x[0]**2/5.0/pow(10,-3))*sin(6*pi*x[1])**2
-
-class StalkCell_Initial_Condition(UserExpression):
-    def eval(self, values, x):
-        values[:] = 0.0
-
-# Number of finite elements in x and y direction:
+# Number of finite elements:
 n_x = 200
-n_y = 200
 
-# Define domain and mesh:
-mesh = UnitSquareMesh(n_x,n_y)
+# Create the spatial domain:
+mesh = UnitIntervalMesh(n_x)
 # Define labels for Cartesian coordinates
-(x,y) = SpatialCoordinate(mesh)
+X = SpatialCoordinate(mesh)
 
 # Define Finite Elements for Functions:
 # Quadratic Lagrange polynomials on triangle element
-V = FiniteElement("CG", triangle, 2)
+V = FiniteElement("CG",interval, 2)
 
 # Create a mixed finite element to solve for n(x,y,t) and e(x,y,t)
 # simultaneously:
 A = FunctionSpace(mesh, V) # This is a single scalar function space for either n, e, or c
 Q = FunctionSpace(mesh, MixedElement([V,V]))
 
-# Define a function q which stores [n(x,y,t), e(x,y,t)]
+# Set up Initial Condition on the domain:
+# Using the CSV Initial Condition:
+print('Interpolating initial condition onto FEM mesh')
+print('Tip cells...')
+n_init_cond = interpolate(InitialConditionfromCSVFile(TCinterpolant, element = A.ufl_element()), A)
+print('Done!')
+print('Stalk Cells...')
+e_init_cond = interpolate(InitialConditionfromCSVFile(ECinterpolant, element = A.ufl_element()), A)
+print('Done!')
+
+## Set up c(x,y,t). Since this is assumed to be at steady state, it is
+## not included in the mixed Finite Element
+print('TAF Concentration...')
+c = Function(A)
+c.assign(interpolate(TAF_Profile(element = A.ufl_element()), A))
+print('Done!')
+
+# Define a function which evaluates the inner product of the gradients of two scalar fields:
+def rhs(a,b):
+    return -inner(grad(a), grad(b))*dx
+
+# Define a function q which stores n(x,y,t) and e(x,y,t)
 q = Function(Q)
 
 # Create a function incorporating the values of q_{t-1}
@@ -95,52 +106,30 @@ q_prevs = Function(Q)
 
 # Define an arbitrary test function on the mixed Function Space:
 p = TestFunction(Q)
+
 # Split this test function into 2 separate ones for n(x,y,t), e(x,y,t):
-(v,r) = split(p)
+(v,r) = split(p) # Define arbitrary test functions
 
-# Set up Initial Condition on the domain:
-print('Interpolating initial condition onto FEM mesh')
-print('Tip cells...')
-# Uncomment the following line of code if you wish to specify the initial condition using ABM data
-n_init_cond = interpolate(InitialConditionfromCSVFile(TCinterpolant, element = A.ufl_element()), A)
-# Uncomment the following line of code if you wish to specify a custom initial condition
-#n_init_cond = interpolate(TipCell_Initial_Condition(element=A.ufl_element()),A)
-print('Done!')
-print('Stalk Cells...')
-# Uncomment this line of code if you wish to specify the initial condition using ABM data
-e_init_cond = interpolate(InitialConditionfromCSVFile(ECinterpolant, element = A.ufl_element()), A)
-# Uncomment the following line of code if you wish to specify a custom initial condition
-#e_init_cond = interpolate(StalkCell_Initial_Condition(element=A.ufl_element()),A)
-print('Done!')
 
-# Assign to each component in q and q_prevs the functions you have just interpolated
+# Assign to each component in q and q_prevs the initial conditions you have just interpolated
 assign(q, [n_init_cond, e_init_cond])
 assign(q_prevs, [n_init_cond, e_init_cond])
 
-## Set up c(x,y). Since this is assumed to be at steady state, it is
-## not included in the mixed Finite Element
-print('TAF Concentration...')
-c = Function(A)
-c.assign(interpolate(TAF_Profile(element = A.ufl_element()), A))
-print('Done!')
-
 # Split the mixed Function q into 2 separate functions: n is for tip cells, and e is for stalk cells
 (n,e) = split(q)
-
-# Define a function which evaluates the inner product of the gradients of two scalar fields:
-def rhs(a,b):
-    return -inner(grad(a), grad(b))*dx
 
 # Enter all parameters as positive numbers
 # (negative values already have their signs considered in the variational form below)
 D = Constant(0.001) # Random motility coefficient for tip cells
 chi = Constant(0.4) # Chemotactic sensitivity for tip cells
-Lambda = Constant(0.16) # Branching Rate of tip cells
-beta_n = Constant(160.0) # Rate of Tip-to-Tip Anastomosis
-beta_e = Constant(5.0) # Rate of Tip-to-Sprout Anastomosis
-Dx = Constant(1.0/200) # Spatial Step Size of Agent-Based Model/Length of a Cell
+Lambda = Constant(0.0) # Branching Rate of tip cells
+beta_n = Constant(0.0) # Rate of Tip-to-Tip Anastomosis
+beta_e = Constant(0.0) # Rate of Tip-to-Sprout Anastomosis
+Dx = Constant(1.0/200) # Spatial Step Size of Agent-Based Model
 Kappa = 4.0*D/chi/sqrt(inner(grad(c),grad(c)))/Dx
-#Kappa = Constant(2.0)
+#Kappa = Constant(sqrt(2)*2)
+#Kappa = Expression("2.0*pow(10,-3)*200.0/0.4*(std::log(1+1.0/sqrt(2-4*x[0]+4*pow(x[0],2)))-std::log(1-1.0/sqrt(2-4*x[0]+4*pow(x[0],2))))", element=A.ufl_element())
+#Kappa = Expression('2.0*pow(10,-3)*200/0.4*(std::log(1+1.0/sqrt(1+pow(x[0],2))) + std::log(1-1.0/sqrt(1+pow(x[0],2))))', element = A.ufl_element())
 
 # Uncomment the following line of code for cases in which Kappa is a constant,
 # to check that you have the right value:
@@ -148,7 +137,7 @@ Kappa = 4.0*D/chi/sqrt(inner(grad(c),grad(c)))/Dx
 
 # Set up time values:
 T = Decimal("2.0") # Final Time
-t = Decimal("0.0") # Initial Time
+t = Decimal("0.2") # Initial Time
 h = Decimal("0.001") # Time Step
 dt = Constant(float(h)) # Time Step Represented as a floating point number
 nTimeStep = 0 # Number of time steps taken so far
@@ -170,9 +159,9 @@ F_cn = (n*v*dxm -q_prevs[0]*v*dxm
 # Create output .pvd Files to store the solution of n(x,y,t), e(x,y,t),
 # c(x,y,t) at various time points:
 
-output1 = File("Tip_Cells.pvd") # n(x,y,t)
-output2 = File("Stalk_Cells.pvd") # e(x,y,t)
-output3 = File("TAF_Concentration.pvd")
+output1 = File("Tip_Cells_1DSnailTrailPDE.pvd") # n(x,y,t)
+output2 = File("Stalk_Cells_1DSnailTrailPDE.pvd") # e(x,y,t)
+output3 = File("TAF_Concentration_1DSnailTrailPDE.pvd") # c(x,y,t)
 
 # Output initial condition to files
 (n0,e0) = q_prevs.split()
@@ -180,25 +169,47 @@ output1<<(n0, float(t))
 output2<<(e0, float(t))
 output3<<(c, float(t))
 
+TC_CSVname = 'Tip_Cells_1DSnailTrailPDE_CSV_Data_t'
+EC_CSVname = 'Stalk_Cells_1DSnailTrailPDE_CSV_Data_t'
+X2 = mesh.coordinates()
+save_TC_name = TC_CSVname + str(2) + '.csv'
+save_EC_name = EC_CSVname + str(2) + '.csv'
+np.savetxt(save_TC_name, (X2[:,0], n0.compute_vertex_values(mesh)), delimiter=',')
+np.savetxt(save_EC_name, (X2[:,0], e0.compute_vertex_values(mesh)), delimiter=',')
+
+PDE_TCdata = n0.compute_vertex_values(mesh)
+PDE_ECdata = e0.compute_vertex_values(mesh)
 
 # Solve the PDE system using Finite Elements:
 while True:
     # Update time step
     t += h
     print("Solving for Time: ", float(t))
-###########################   Crank-Nicolson Method      ######################
+
     # Solve the nonlinear PDE system using Crank-Nicolson time-stepping and GMRES for linear solver, with Jacobi preconditioner:
     solve(F_cn==0, q, solver_parameters={'newton_solver': {'linear_solver':'gmres', 'preconditioner': 'jacobi'}})
 
-    # Reset q_{t-1}
+    # Reset q_{n-1}
     q_prevs.assign(q)
 
     # Increase time step counter
     nTimeStep += 1
 
-    # Output to files only in increments of 0.01 seconds
+    # Output to PVD files in increments of 0.01 seconds
     if nTimeStep%10==0:
         (n_k, e_k) = q_prevs.split()
         output1<<(n_k, float(t))
         output2<<(e_k, float(t))
+
+    # Output to CSV files in increments of 0.2 seconds
+    if nTimeStep%200==0:
+        (n_k, e_k) = q_prevs.split()
+        i = int(round(nTimeStep/200)*2+2)
+        # Save solution
+        save_TC_name = TC_CSVname + str(i) + '.csv'
+        save_EC_name = EC_CSVname + str(i) + '.csv'
+        np.savetxt(save_TC_name, (X2[:,0], n_k.compute_vertex_values(mesh)), delimiter=',')
+        np.savetxt(save_EC_name, (X2[:,0], e_k.compute_vertex_values(mesh)), delimiter=',')
+        PDE_TCdata = np.concatenate((PDE_TCdata, n_k.compute_vertex_values(mesh)))
+        PDE_ECdata = np.concatenate((PDE_ECdata, e_k.compute_vertex_values(mesh)))
     if t >= T: break
